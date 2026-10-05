@@ -33,6 +33,11 @@
   let scrollStarted = 0;
   let scrollDuration = 0;
   let scrollRaf = 0;
+  let touchId = null;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchLastY = 0;
+  let touchAxis = '';
 
   function schedule() {
     if (!raf && active) raf = requestAnimationFrame(render);
@@ -172,35 +177,80 @@
     }
   }
 
-  function onWheel(event) {
-    if (!precisePointer.matches || reducedMotion.matches || event.ctrlKey || document.body.classList.contains('modal-open')) return;
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-
+  function queueHeroScroll(delta) {
     const heroTop = scrollY + hero.getBoundingClientRect().top;
     const heroTravel = Math.max(1, hero.offsetHeight - heroSticky.offsetHeight);
     const heroEnd = heroTop + heroTravel;
     const current = scrollY;
     const insideHero = current >= heroTop - 1 && current <= heroEnd + 1;
-    if (!insideHero) return;
+    if (!insideHero) return false;
     if (!scrollRaf) scrollTarget = current;
 
-    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? innerHeight : 1;
-    const delta = event.deltaY * unit;
     const remainingDirection = Math.sign(scrollTarget - current);
     if (scrollRaf && remainingDirection && Math.sign(delta) !== remainingDirection) scrollTarget = current;
 
     const nextTarget = Math.max(heroTop, Math.min(heroEnd, scrollTarget + delta));
     const waitingAtEdge = scrollRaf && nextTarget === scrollTarget;
-    if (nextTarget === current && !waitingAtEdge) return;
+    if (nextTarget === current && !waitingAtEdge) return false;
 
-    event.preventDefault();
-    if (nextTarget === scrollTarget && scrollRaf) return;
+    if (nextTarget === scrollTarget && scrollRaf) return true;
 
     scrollFrom = current;
     scrollTarget = nextTarget;
     scrollStarted = performance.now();
     scrollDuration = Math.max(250, fullScrollDuration * Math.abs(scrollTarget - scrollFrom) / heroTravel);
     if (!scrollRaf) scrollRaf = requestAnimationFrame(animateHeroScroll);
+    return true;
+  }
+
+  function onWheel(event) {
+    if (!precisePointer.matches || reducedMotion.matches || event.ctrlKey || document.body.classList.contains('modal-open')) return;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? innerHeight : 1;
+    if (queueHeroScroll(event.deltaY * unit)) event.preventDefault();
+  }
+
+  function onTouchStart(event) {
+    if (reducedMotion.matches || document.body.classList.contains('modal-open') || event.touches.length !== 1) return;
+    if (!(event.target instanceof Element) || !event.target.closest('.hero')) return;
+
+    const touch = event.touches[0];
+    touchId = touch.identifier;
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchLastY = touch.clientY;
+    touchAxis = '';
+  }
+
+  function onTouchMove(event) {
+    if (touchId === null || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    if (touch.identifier !== touchId) return;
+
+    if (!touchAxis) {
+      const xDistance = Math.abs(touch.clientX - touchStartX);
+      const yDistance = Math.abs(touch.clientY - touchStartY);
+      if (Math.max(xDistance, yDistance) < 6) return;
+      touchAxis = yDistance > xDistance ? 'vertical' : 'horizontal';
+    }
+    if (touchAxis !== 'vertical') return;
+
+    const delta = touchLastY - touch.clientY;
+    touchLastY = touch.clientY;
+    if (delta && queueHeroScroll(delta)) event.preventDefault();
+  }
+
+  function onTouchEnd(event) {
+    if (touchId === null) return;
+    let stillActive = false;
+    for (let index = 0; index < event.touches.length; index++) {
+      if (event.touches[index].identifier === touchId) stillActive = true;
+    }
+    if (!stillActive) {
+      touchId = null;
+      touchAxis = '';
+    }
   }
 
   function onScroll() {
@@ -230,6 +280,10 @@
     new ResizeObserver(resize).observe(film);
     addEventListener('scroll', onScroll, { passive: true });
     addEventListener('wheel', onWheel, { passive: false });
+    addEventListener('touchstart', onTouchStart, { passive: true });
+    addEventListener('touchmove', onTouchMove, { passive: false });
+    addEventListener('touchend', onTouchEnd, { passive: true });
+    addEventListener('touchcancel', onTouchEnd, { passive: true });
     addEventListener('pointerdown', stopScrollAnimation, { passive: true });
     reducedMotion.addEventListener('change', () => { stopScrollAnimation(); drawnFrame = -1; resize(); });
     loadFrame(reducedMotion.matches ? frameCount - 1 : 0);
