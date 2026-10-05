@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Local visual QA artifacts
+/previews/
+/design-qa.md
+
+# Local source materials and unrelated workspace
+/Downloads/
+/kling_*.mp4
+/tretyakov-art-scroll/
